@@ -32,11 +32,39 @@
  */
 
 (async function unsubscribeAll() {
+    // Ask for confirmation
+    if (!confirm('⚠️ Warning: This will unsubscribe you from all channels.\nDo you want to continue?')) {
+        console.log('❌ Operation cancelled by user.');
+        return;
+    }
+
+    // Configuration
+    const config = {
+        maxUnsubscribes: Infinity, // Set a number to limit unsubscriptions
+        retryAttempts: 3,
+        isPaused: false
+    };
+
     console.log("🔄 Starting YouTube mass unsubscribe process...");
+    console.log("ℹ️ Press 'P' to pause/resume the script");
 
     let unsubscribedCount = 0;
-    
-    while (true) {
+    let totalFound = 0;
+
+    // Add pause/resume listener
+    document.addEventListener('keypress', (e) => {
+        if (e.key.toLowerCase() === 'p') {
+            config.isPaused = !config.isPaused;
+            console.log(config.isPaused ? '⏸️ Script paused' : '▶️ Script resumed');
+        }
+    });
+
+    while (unsubscribedCount < config.maxUnsubscribes) {
+        // Check if paused
+        while (config.isPaused) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
         // Wait for elements to load
         await new Promise(resolve => setTimeout(resolve, 3000));
 
@@ -49,47 +77,56 @@
             break;
         }
 
-        console.log(`📢 Found ${subscribedButtons.length} subscriptions to remove.`);
+        totalFound = subscribedButtons.length;
+        console.log(`📢 Found ${totalFound} subscriptions to remove.`);
 
-        for (let i = 0; i < subscribedButtons.length; i++) {
+        for (let i = 0; i < subscribedButtons.length && unsubscribedCount < config.maxUnsubscribes; i++) {
             try {
+                // Check if paused
+                while (config.isPaused) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
                 let button = subscribedButtons[i];
+                let retryCount = 0;
 
                 // Locate the closest channel name
                 let channelContainer = button.closest('ytd-channel-renderer, ytd-grid-channel-renderer, ytd-rich-grid-media');
                 let channelName = channelContainer ? channelContainer.querySelector('yt-formatted-string')?.innerText?.trim() : "Unknown Channel";
 
-                console.log(`➡️ Unsubscribing from: ${channelName}`);
+                console.log(`➡️ Unsubscribing from: ${channelName} (${unsubscribedCount + 1}/${totalFound})`);
 
-                button.click(); // Click "Subscribed" to open the menu
+                while (retryCount < config.retryAttempts) {
+                    try {
+                        button.click();
+                        await new Promise(resolve => setTimeout(resolve, 1500));
 
-                // Wait for the "Unsubscribe" option to appear
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                        let unsubscribeOption = Array.from(document.querySelectorAll('tp-yt-paper-item, yt-formatted-string'))
+                            .find(el => el.innerText.trim().toLowerCase() === "unsubscribe");
 
-                // Find and click the "Unsubscribe" option
-                let unsubscribeOption = Array.from(document.querySelectorAll('tp-yt-paper-item, yt-formatted-string'))
-                    .find(el => el.innerText.trim().toLowerCase() === "unsubscribe");
+                        if (!unsubscribeOption) {
+                            throw new Error('Unsubscribe option not found');
+                        }
 
-                if (unsubscribeOption) {
-                    unsubscribeOption.click();
-                    console.log(`🔘 Clicked 'Unsubscribe' for: ${channelName}`);
-                } else {
-                    console.warn(`⚠️ No 'Unsubscribe' option found for: ${channelName}. Skipping...`);
-                    continue;
-                }
+                        unsubscribeOption.click();
+                        await new Promise(resolve => setTimeout(resolve, 2000));
 
-                // Wait for confirmation popup
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                        let confirmBtn = document.querySelector('yt-button-renderer#confirm-button button');
+                        if (!confirmBtn) {
+                            throw new Error('Confirm button not found');
+                        }
 
-                // Find and click the confirmation "Unsubscribe" button inside the popup
-                let confirmBtn = document.querySelector('yt-button-renderer#confirm-button button');
-
-                if (confirmBtn) {
-                    confirmBtn.click();
-                    console.log(`✅ Successfully unsubscribed from: ${channelName}`);
-                } else {
-                    console.warn(`⚠️ No confirmation button found for: ${channelName}. Skipping...`);
-                    continue;
+                        confirmBtn.click();
+                        console.log(`✅ Successfully unsubscribed from: ${channelName}`);
+                        break;
+                    } catch (err) {
+                        retryCount++;
+                        if (retryCount === config.retryAttempts) {
+                            throw err;
+                        }
+                        console.warn(`⚠️ Retry ${retryCount}/${config.retryAttempts} for: ${channelName}`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
                 }
 
                 unsubscribedCount++;
@@ -100,7 +137,7 @@
                 await new Promise(resolve => setTimeout(resolve, delay));
 
             } catch (error) {
-                console.error(`❌ Error unsubscribing from channel ${i + 1}:`, error);
+                console.error(`❌ Error unsubscribing from ${channelName}:`, error.message);
             }
         }
     }
